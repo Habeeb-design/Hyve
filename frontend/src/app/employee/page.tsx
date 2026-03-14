@@ -49,6 +49,205 @@ interface TierInfo {
   reason: string | null;
 }
 
+/* ── Benefits campaign config ── */
+
+interface Campaign {
+  id: string;
+  name: string;
+  description: string;
+  protocol: string;
+  protocolUrl: string;
+  apy: number;
+  totalPooled: number;
+  members: number;
+  lockDays: number | null;
+  category: "time-off" | "health" | "emergency" | "retirement";
+  accentClass: string;
+  strokeColor: string;
+  history: number[]; // 12 months of index values (base 1000)
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const CAMPAIGNS: Campaign[] = [
+  {
+    id: "pto",
+    name: "PTO Reserve",
+    description: "Earn yield on your accrued PTO balance while it sits unused. Liquid anytime — withdraw when you take leave.",
+    protocol: "Aave v3",
+    protocolUrl: "https://aave.com",
+    apy: 4.2,
+    totalPooled: 48200,
+    members: 127,
+    lockDays: null,
+    category: "time-off",
+    accentClass: "text-accent border-accent/40 bg-accent/5",
+    strokeColor: "#f59e0b",
+    history: [1000, 1035, 1072, 1110, 1150, 1192, 1236, 1281, 1329, 1379, 1430, 1484],
+  },
+  {
+    id: "medical",
+    name: "Medical Fund",
+    description: "Set aside funds for healthcare expenses. Earns yield passively — withdraw when you need it for eligible medical costs.",
+    protocol: "Compound v3",
+    protocolUrl: "https://compound.finance",
+    apy: 3.8,
+    totalPooled: 125000,
+    members: 241,
+    lockDays: null,
+    category: "health",
+    accentClass: "text-success border-success/40 bg-success/5",
+    strokeColor: "#22c55e",
+    history: [1000, 1032, 1065, 1099, 1134, 1170, 1207, 1246, 1286, 1327, 1370, 1414],
+  },
+  {
+    id: "emergency",
+    name: "Emergency Buffer",
+    description: "Build a 3-month salary buffer. Stays liquid at all times while earning competitive yield through the vault.",
+    protocol: "RLUSD Vault",
+    protocolUrl: "#",
+    apy: 5.1,
+    totalPooled: 32000,
+    members: 89,
+    lockDays: null,
+    category: "emergency",
+    accentClass: "text-blue-400 border-blue-400/40 bg-blue-400/5",
+    strokeColor: "#60a5fa",
+    history: [1000, 1043, 1087, 1133, 1181, 1231, 1284, 1339, 1397, 1458, 1521, 1588],
+  },
+  {
+    id: "retirement",
+    name: "Retirement Boost",
+    description: "Long-term savings with higher yield. Complements your 401k with on-chain DeFi returns.",
+    protocol: "Staked RLUSD",
+    protocolUrl: "#",
+    apy: 7.4,
+    totalPooled: 289000,
+    members: 316,
+    lockDays: 365,
+    category: "retirement",
+    accentClass: "text-purple-400 border-purple-400/40 bg-purple-400/5",
+    strokeColor: "#a78bfa",
+    history: [1000, 1062, 1128, 1198, 1272, 1350, 1433, 1521, 1615, 1715, 1821, 1934],
+  },
+];
+
+/* ── SVG Chart components ── */
+
+function MiniSparkline({ data, strokeColor, id }: { data: number[]; strokeColor: string; id: string }) {
+  const W = 120, H = 40;
+  const min = Math.min(...data), max = Math.max(...data);
+  const range = max - min || 1;
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * W;
+    const y = H - ((v - min) / range) * (H - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const first = pts[0].split(",");
+  const last = pts[pts.length - 1].split(",");
+  const areaPath = `${first[0]},${H} ${pts.join(" ")} ${last[0]},${H}`;
+  const gradId = `spark-${id}`;
+  return (
+    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="overflow-visible">
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={strokeColor} stopOpacity="0.25" />
+          <stop offset="100%" stopColor={strokeColor} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={areaPath} fill={`url(#${gradId})`} />
+      <polyline points={pts.join(" ")} fill="none" stroke={strokeColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CampaignAreaChart({ campaign, userHistory }: { campaign: Campaign; userHistory: number[] }) {
+  const W = 480, H = 140;
+  const PAD = { top: 8, right: 16, bottom: 28, left: 48 };
+  const iW = W - PAD.left - PAD.right;
+  const iH = H - PAD.top - PAD.bottom;
+
+  const data = campaign.history;
+  const min = Math.min(...data), max = Math.max(...data);
+  const range = max - min || 1;
+
+  const pts = data.map((v, i) => {
+    const x = PAD.left + (i / (data.length - 1)) * iW;
+    const y = PAD.top + iH - ((v - min) / range) * iH;
+    return [x, y] as [number, number];
+  });
+
+  const lineStr = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const areaStr = `${PAD.left},${PAD.top + iH} ${lineStr} ${pts[pts.length - 1][0].toFixed(1)},${PAD.top + iH}`;
+  const gradId = `area-${campaign.id}`;
+
+  // 3 y-axis ticks
+  const yTicks = [min, min + range / 2, max];
+
+  // current month index
+  const now = new Date();
+  const curMonth = now.getMonth();
+  const tickMonths = data.map((_, i) => MONTHS[(curMonth - (data.length - 1) + i + 12) % 12]);
+
+  return (
+    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={campaign.strokeColor} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={campaign.strokeColor} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+
+      {/* Grid lines */}
+      {yTicks.map((_, i) => {
+        const y = PAD.top + (i / (yTicks.length - 1)) * iH;
+        return <line key={i} x1={PAD.left} x2={PAD.left + iW} y1={y} y2={y} stroke="#ffffff10" strokeWidth="1" />;
+      })}
+
+      {/* Y axis labels */}
+      {yTicks.map((v, i) => {
+        const y = PAD.top + ((yTicks.length - 1 - i) / (yTicks.length - 1)) * iH;
+        return (
+          <text key={i} x={PAD.left - 6} y={y + 4} textAnchor="end" fontSize="9" fill="#ffffff40">
+            {v.toFixed(0)}
+          </text>
+        );
+      })}
+
+      {/* X axis labels — every 3 months */}
+      {tickMonths.map((m, i) => {
+        if (i % 3 !== 0) return null;
+        const x = PAD.left + (i / (data.length - 1)) * iW;
+        return (
+          <text key={i} x={x} y={H - 6} textAnchor="middle" fontSize="9" fill="#ffffff40">{m}</text>
+        );
+      })}
+
+      {/* Area + line */}
+      <polygon points={areaStr} fill={`url(#${gradId})`} />
+      <polyline points={lineStr} fill="none" stroke={campaign.strokeColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+
+      {/* User allocation line (if they have a balance) */}
+      {userHistory.length > 0 && (
+        <>
+          {userHistory.map((v, i) => {
+            if (i === 0) return null;
+            const scale = (v - Math.min(...userHistory)) / ((Math.max(...userHistory) - Math.min(...userHistory)) || 1);
+            const x1 = PAD.left + ((i - 1) / (userHistory.length - 1)) * iW;
+            const x2 = PAD.left + (i / (userHistory.length - 1)) * iW;
+            const y1 = PAD.top + iH - scale * iH;
+            const y2 = PAD.top + iH - ((userHistory[i] - Math.min(...userHistory)) / ((Math.max(...userHistory) - Math.min(...userHistory)) || 1)) * iH;
+            return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#ffffff60" strokeWidth="1" strokeDasharray="3 2" />;
+          })}
+        </>
+      )}
+
+      {/* Latest value dot */}
+      <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="3" fill={campaign.strokeColor} />
+    </svg>
+  );
+}
+
 /* ── Shared UI atoms ── */
 
 function InfoTip({ text }: { text: string }) {
@@ -206,7 +405,13 @@ export default function EmployeeDashboard() {
   const [lastTxHash, setLastTxHash] = useState<string | null>(null);
   const [creditworthyCelebration, setCreditworthyCelebration] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<"savings" | "loans" | "history">("savings");
+  const [activeTab, setActiveTab] = useState<"savings" | "loans" | "benefits" | "history">("savings");
+
+  // Benefits
+  const [optedIn, setOptedIn] = useState<Set<string>>(new Set());
+  const [benefitInputs, setBenefitInputs] = useState<Record<string, string>>({});
+  const [benefitBalances, setBenefitBalances] = useState<Record<string, number>>({});
+  const [expandedCampaign, setExpandedCampaign] = useState<string | null>(null);
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [ledgerLoading, setLedgerLoading] = useState(false);
 
@@ -576,17 +781,21 @@ export default function EmployeeDashboard() {
 
           {/* Tabs */}
           <div className="flex gap-1 mb-6 bg-card-bg border border-card-border rounded-xl p-1 w-fit">
-            {(["savings", "loans", "history"] as const).map((tab) => {
+            {(["savings", "loans", "benefits", "history"] as const).map((tab) => {
               const isActive = activeTab === tab;
+              const label = tab === "benefits" ? "Benefits" : tab.charAt(0).toUpperCase() + tab.slice(1);
               return (
                 <button
                   key={tab}
                   onClick={() => { setActiveTab(tab); if (tab === "history" && ledger.length === 0) fetchLedger(); }}
                   className={`relative px-5 py-2 text-sm font-medium rounded-lg transition-all ${isActive ? "bg-accent text-black shadow-sm" : "text-foreground/50 hover:text-foreground"}`}
                 >
-                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  {label}
                   {tab === "loans" && activeLoanCount > 0 && (
                     <span className={`ml-1.5 text-xs rounded-full px-1.5 py-0.5 font-semibold ${isActive ? "bg-black/20 text-black" : "bg-accent/20 text-accent"}`}>{activeLoanCount}</span>
+                  )}
+                  {tab === "benefits" && optedIn.size > 0 && (
+                    <span className={`ml-1.5 text-xs rounded-full px-1.5 py-0.5 font-semibold ${isActive ? "bg-black/20 text-black" : "bg-accent/20 text-accent"}`}>{optedIn.size}</span>
                   )}
                 </button>
               );
@@ -836,6 +1045,207 @@ export default function EmployeeDashboard() {
                 </div>
                 {!hasEmployee && <p className="text-danger text-xs mt-2">Missing &quot;employee&quot; credential — ask your employer to add you.</p>}
                 {loanTiers[loanTier] && !loanTiers[loanTier].eligible && hasEmployee && <p className="text-danger text-xs mt-2">{loanTiers[loanTier].reason}</p>}
+              </div>
+            </div>
+          )}
+
+          {/* ═══ Benefits Tab ═══ */}
+          {activeTab === "benefits" && (
+            <div className="space-y-6">
+
+              {/* Summary strip */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="border border-card-border bg-card-bg rounded-xl p-4">
+                  <div className="text-foreground/40 text-xs uppercase tracking-wide mb-1">Active Campaigns</div>
+                  <div className="text-2xl font-bold">{optedIn.size}<span className="text-foreground/30 text-sm font-normal"> / {CAMPAIGNS.length}</span></div>
+                </div>
+                <div className="border border-card-border bg-card-bg rounded-xl p-4">
+                  <div className="text-foreground/40 text-xs uppercase tracking-wide mb-1">Total Allocated</div>
+                  <div className="text-2xl font-bold text-accent">
+                    ${Object.values(benefitBalances).reduce((a, b) => a + b, 0).toFixed(2)}
+                  </div>
+                </div>
+                <div className="border border-card-border bg-card-bg rounded-xl p-4">
+                  <div className="text-foreground/40 text-xs uppercase tracking-wide mb-1">Est. Annual Yield</div>
+                  <div className="text-2xl font-bold text-success">
+                    ${CAMPAIGNS.filter(c => optedIn.has(c.id)).reduce((sum, c) => sum + (benefitBalances[c.id] || 0) * c.apy / 100, 0).toFixed(2)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Campaign grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {CAMPAIGNS.map((campaign) => {
+                  const isIn = optedIn.has(campaign.id);
+                  const balance = benefitBalances[campaign.id] || 0;
+                  const input = benefitInputs[campaign.id] || "";
+                  const isExpanded = expandedCampaign === campaign.id;
+                  const estimatedEarnings = balance * campaign.apy / 100;
+                  const categoryIcons: Record<Campaign["category"], string> = {
+                    "time-off": "🏖️",
+                    "health": "🏥",
+                    "emergency": "🛡️",
+                    "retirement": "🏦",
+                  };
+
+                  return (
+                    <div
+                      key={campaign.id}
+                      className={`border rounded-xl overflow-hidden transition-all ${isIn ? `border-opacity-60 ${campaign.accentClass.split(" ").find(c => c.startsWith("border-")) ?? "border-card-border"}` : "border-card-border bg-card-bg"}`}
+                    >
+                      {/* Card header */}
+                      <div className="p-5">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-lg">{categoryIcons[campaign.category]}</span>
+                            <div>
+                              <div className="font-semibold text-sm">{campaign.name}</div>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${campaign.accentClass}`}>
+                                  {campaign.protocol}
+                                </span>
+                                {campaign.lockDays && (
+                                  <span className="text-xs text-foreground/40 flex items-center gap-0.5">
+                                    <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
+                                    {campaign.lockDays}d lock
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className={`text-2xl font-bold ${campaign.accentClass.split(" ")[0]}`}>
+                              {campaign.apy}%
+                            </div>
+                            <div className="text-foreground/40 text-xs">APY</div>
+                          </div>
+                        </div>
+
+                        <p className="text-foreground/50 text-xs mb-4 leading-relaxed">{campaign.description}</p>
+
+                        {/* Sparkline */}
+                        <div className="mb-3">
+                          <MiniSparkline data={campaign.history} strokeColor={campaign.strokeColor} id={campaign.id} />
+                        </div>
+
+                        {/* Pool stats */}
+                        <div className="flex gap-4 text-xs text-foreground/40 mb-4">
+                          <span>${(campaign.totalPooled / 1000).toFixed(0)}k pooled</span>
+                          <span>·</span>
+                          <span>{campaign.members} members</span>
+                          {isIn && balance > 0 && (
+                            <>
+                              <span>·</span>
+                              <span className="text-success">+${estimatedEarnings.toFixed(2)}/yr est.</span>
+                            </>
+                          )}
+                        </div>
+
+                        {/* User balance (if opted in) */}
+                        {isIn && balance > 0 && (
+                          <div className="bg-background/60 border border-card-border rounded-lg p-3 mb-4">
+                            <div className="flex justify-between items-center">
+                              <div>
+                                <div className="text-xs text-foreground/40 mb-0.5">Your balance</div>
+                                <div className={`text-lg font-bold ${campaign.accentClass.split(" ")[0]}`}>${balance.toFixed(2)}</div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-xs text-foreground/40 mb-0.5">Est. earned</div>
+                                <div className="text-sm font-semibold text-success">+${(balance * campaign.apy / 100 / 12).toFixed(3)}/mo</div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Action row */}
+                        {!isIn ? (
+                          <div className="flex gap-2">
+                            <input
+                              type="number"
+                              value={input}
+                              onChange={(e) => setBenefitInputs(prev => ({ ...prev, [campaign.id]: e.target.value }))}
+                              placeholder="Amount (RLUSD)"
+                              className="bg-background border border-card-border rounded-lg px-3 py-1.5 text-xs flex-1 focus:outline-none focus:border-accent transition-colors"
+                            />
+                            <button
+                              onClick={() => {
+                                const amt = parseFloat(input);
+                                if (!amt || amt <= 0) return;
+                                setOptedIn(prev => new Set([...prev, campaign.id]));
+                                setBenefitBalances(prev => ({ ...prev, [campaign.id]: amt }));
+                                setBenefitInputs(prev => ({ ...prev, [campaign.id]: "" }));
+                              }}
+                              disabled={!input || parseFloat(input) <= 0}
+                              className={`text-xs font-semibold px-4 py-1.5 rounded-lg border transition-all disabled:opacity-40 ${campaign.accentClass}`}
+                            >
+                              Opt In
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex gap-2 items-center">
+                            <div className={`flex-1 text-xs font-medium flex items-center gap-1.5 ${campaign.accentClass.split(" ")[0]}`}>
+                              <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                              Enrolled
+                            </div>
+                            <button
+                              onClick={() => setExpandedCampaign(isExpanded ? null : campaign.id)}
+                              className="text-xs text-foreground/50 hover:text-foreground border border-card-border rounded-lg px-3 py-1.5 transition-colors"
+                            >
+                              {isExpanded ? "Hide chart" : "View chart"}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setOptedIn(prev => { const n = new Set(prev); n.delete(campaign.id); return n; });
+                                setBenefitBalances(prev => { const n = { ...prev }; delete n[campaign.id]; return n; });
+                                if (expandedCampaign === campaign.id) setExpandedCampaign(null);
+                              }}
+                              className="text-xs text-danger/60 hover:text-danger transition-colors px-2"
+                            >
+                              Withdraw
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Expanded chart panel */}
+                      {isExpanded && (
+                        <div className="border-t border-card-border bg-background/40 px-5 py-4">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="text-xs text-foreground/50 font-medium uppercase tracking-wide">12-Month Pool Performance</div>
+                            <div className={`text-xs font-semibold ${campaign.accentClass.split(" ")[0]}`}>
+                              +{((campaign.history[campaign.history.length - 1] / campaign.history[0] - 1) * 100).toFixed(1)}% growth
+                            </div>
+                          </div>
+                          <CampaignAreaChart campaign={campaign} userHistory={[]} />
+                          <div className="grid grid-cols-3 gap-3 mt-4 text-center">
+                            <div>
+                              <div className="text-foreground/40 text-xs mb-0.5">Starting NAV</div>
+                              <div className="text-sm font-semibold">{campaign.history[0].toFixed(0)}</div>
+                            </div>
+                            <div>
+                              <div className="text-foreground/40 text-xs mb-0.5">Current NAV</div>
+                              <div className={`text-sm font-semibold ${campaign.accentClass.split(" ")[0]}`}>
+                                {campaign.history[campaign.history.length - 1].toFixed(0)}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-foreground/40 text-xs mb-0.5">APY</div>
+                              <div className="text-sm font-semibold text-success">{campaign.apy}%</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Info footer */}
+              <div className="border border-card-border rounded-xl p-4 text-xs text-foreground/30 leading-relaxed">
+                <span className="text-foreground/50 font-medium">How it works: </span>
+                Opt in to a campaign by allocating RLUSD. Your funds are deployed to the listed DeFi protocol and earn yield continuously.
+                You can withdraw anytime (except locked campaigns). APY figures are trailing 30-day averages and may vary.
+                All on-chain activity is verifiable on XRPL Devnet.
               </div>
             </div>
           )}
