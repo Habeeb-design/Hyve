@@ -44,6 +44,22 @@ interface TxHashes {
   credentialAccept?: string;
 }
 
+/* ── Shared UI atoms ── */
+
+function InfoTip({ text }: { text: string }) {
+  return (
+    <span className="relative group inline-flex ml-1 cursor-help">
+      <svg className="h-3.5 w-3.5 text-foreground/30 group-hover:text-accent transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="10" strokeWidth="2" />
+        <path strokeLinecap="round" strokeWidth="2" d="M12 16v-4m0-4h.01" />
+      </svg>
+      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 rounded-lg bg-foreground text-background text-xs leading-relaxed p-3 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity z-50">
+        {text}
+      </span>
+    </span>
+  );
+}
+
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -67,6 +83,7 @@ function TxLink({ hash, label }: { hash: string; label: string }) {
       target="_blank"
       rel="noopener noreferrer"
       className="text-xs text-accent hover:underline font-mono"
+      title="View this transaction on the XRPL Devnet explorer"
     >
       {label}: {hash.slice(0, 12)}...
     </a>
@@ -87,6 +104,13 @@ function Spinner({ text }: { text: string }) {
     </div>
   );
 }
+
+const CREDENTIAL_TIPS: Record<string, string> = {
+  employee: "On-chain proof this person works at your company. Required before they can deposit or borrow.",
+  creditworthy: "Earned by fully repaying a loan. Unlocks better borrowing rates and higher limits.",
+};
+
+/* ── Page ── */
 
 export default function EmployerDashboard() {
   const [loading, setLoading] = useState("");
@@ -193,7 +217,8 @@ export default function EmployerDashboard() {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold mb-6">Employer Dashboard</h1>
+      <h1 className="text-3xl font-bold mb-2">Employer Dashboard</h1>
+      <p className="text-foreground/50 text-sm mb-6">Set up a savings vault for your team. Employees deposit, you match, they borrow at fair rates.</p>
 
       {loading && <Spinner text={loading} />}
 
@@ -208,12 +233,12 @@ export default function EmployerDashboard() {
         <div className="border border-card-border bg-card-bg rounded-xl p-6">
           <h2 className="text-xl font-semibold mb-2">Step 1: Connect to XRPL Devnet</h2>
           <p className="text-foreground/60 mb-4 text-sm">
-            Initialize the RLUSD issuer and create your employer wallet.
+            This creates a test stablecoin (RLUSD) issuer and your employer wallet on the XRPL test network. Everything here uses test tokens — no real money.
           </p>
           <button
             onClick={handleInit}
             disabled={!!loading}
-            className="bg-accent hover:bg-accent-light text-black font-semibold px-6 py-2 rounded-lg transition-colors disabled:opacity-50"
+            className="bg-accent hover:bg-accent-light text-black font-semibold px-6 py-2.5 rounded-lg transition-colors disabled:opacity-50"
           >
             Initialize
           </button>
@@ -224,48 +249,92 @@ export default function EmployerDashboard() {
       {employer && !vault && (
         <div className="border border-card-border bg-card-bg rounded-xl p-6">
           <h2 className="text-xl font-semibold mb-2">Step 2: Create Company Vault</h2>
-          <div className="text-xs text-foreground/40 mb-4 font-mono break-all">
-            Employer: {employer.address}
+          <p className="text-foreground/60 mb-4 text-sm">
+            A vault is an on-chain savings pool where employees deposit RLUSD and earn shares.
+            Loans are drawn from this pool. Configure how much you want to match below.
+          </p>
+          <div className="text-xs text-foreground/40 mb-4 font-mono break-all bg-background/50 rounded-lg px-3 py-2 border border-card-border">
+            Your employer wallet: {employer.address}
             <CopyButton text={employer.address} />
           </div>
-          <div className="space-y-3">
-            <input
-              type="text"
-              value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
-              placeholder="Company Name"
-              className="bg-background border border-card-border rounded-lg px-4 py-2 w-full text-sm"
-            />
-            <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1.5">
+                Company Name
+              </label>
+              <input
+                type="text"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                placeholder="Acme Corp"
+                className="bg-background border border-card-border rounded-lg px-4 py-2.5 w-full text-sm focus:outline-none focus:border-accent transition-colors"
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs text-foreground/50 mb-1">Match Rate (e.g. 0.5 = 50%)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={matchRate}
-                  onChange={(e) => setMatchRate(e.target.value)}
-                  className="bg-background border border-card-border rounded-lg px-4 py-2 w-full text-sm"
-                />
+                <label className="flex items-center text-sm font-medium mb-1.5">
+                  Employer Match Rate
+                  <InfoTip text="How much you contribute for every dollar an employee deposits. 0.5 means you add 50 cents for every $1 they put in — like a 401k match." />
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="2"
+                    value={matchRate}
+                    onChange={(e) => setMatchRate(e.target.value)}
+                    className="bg-background border border-card-border rounded-lg px-4 py-2.5 w-full text-sm focus:outline-none focus:border-accent transition-colors"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-foreground/30 text-sm">
+                    = {((parseFloat(matchRate) || 0) * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <p className="text-foreground/40 text-xs mt-1">0.5 = 50% match, 1.0 = dollar-for-dollar</p>
               </div>
               <div>
-                <label className="block text-xs text-foreground/50 mb-1">Match Cap (RLUSD per employee)</label>
-                <input
-                  type="number"
-                  value={matchCap}
-                  onChange={(e) => setMatchCap(e.target.value)}
-                  className="bg-background border border-card-border rounded-lg px-4 py-2 w-full text-sm"
-                />
+                <label className="flex items-center text-sm font-medium mb-1.5">
+                  Match Cap per Employee
+                  <InfoTip text="The maximum total RLUSD you'll match per employee. Once reached, further deposits won't be matched. Protects your budget." />
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    value={matchCap}
+                    onChange={(e) => setMatchCap(e.target.value)}
+                    className="bg-background border border-card-border rounded-lg px-4 py-2.5 w-full text-sm focus:outline-none focus:border-accent transition-colors"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-foreground/30 text-sm">RLUSD</span>
+                </div>
+                <p className="text-foreground/40 text-xs mt-1">Total lifetime match limit per person</p>
               </div>
             </div>
+
+            {/* Preview */}
+            <div className="bg-background/50 border border-card-border rounded-lg p-4 text-sm text-foreground/60">
+              <div className="font-medium text-foreground/80 mb-1">Preview</div>
+              If an employee deposits <span className="text-accent font-medium">$200</span>, you auto-contribute{" "}
+              <span className="text-accent font-medium">
+                ${Math.min(200 * (parseFloat(matchRate) || 0), parseFloat(matchCap) || 0).toFixed(0)}
+              </span>{" "}
+              (up to your ${matchCap} cap).
+            </div>
+
             <button
               onClick={handleCreateVault}
               disabled={!!loading}
-              className="bg-accent hover:bg-accent-light text-black font-semibold px-6 py-2 rounded-lg transition-colors disabled:opacity-50"
+              className="bg-accent hover:bg-accent-light text-black font-semibold px-6 py-2.5 rounded-lg transition-colors disabled:opacity-50"
             >
               Create Vault
             </button>
+            <p className="text-foreground/40 text-xs">
+              This sends 3 transactions to XRPL Devnet (~15–20s):
+              <span className="group relative cursor-help ml-1 text-foreground/50 underline decoration-dotted">VaultCreate<span className="pointer-events-none absolute bottom-full left-0 mb-2 w-48 rounded-lg bg-foreground text-background text-xs p-2 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity z-50">Creates the on-chain savings pool</span></span>,{" "}
+              <span className="group relative cursor-help text-foreground/50 underline decoration-dotted">LoanBrokerSet<span className="pointer-events-none absolute bottom-full left-0 mb-2 w-52 rounded-lg bg-foreground text-background text-xs p-2 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity z-50">Enables the vault to issue loans to employees</span></span>, and{" "}
+              <span className="group relative cursor-help text-foreground/50 underline decoration-dotted">CoverDeposit<span className="pointer-events-none absolute bottom-full left-0 mb-2 w-56 rounded-lg bg-foreground text-background text-xs p-2 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity z-50">First-loss capital that protects depositors if a loan defaults</span></span>.
+            </p>
           </div>
-          <p className="text-foreground/40 text-xs mt-2">Takes ~15–20s (3 on-chain transactions: VaultCreate + LoanBrokerSet + cover deposit)</p>
         </div>
       )}
 
@@ -280,71 +349,87 @@ export default function EmployerDashboard() {
               <div className="text-xl font-semibold">{vault.companyName}</div>
             </div>
             <div className="border border-card-border bg-card-bg rounded-xl p-5">
-              <div className="text-foreground/50 text-sm mb-1">Vault Balance (RLUSD)</div>
+              <div className="flex items-center text-foreground/50 text-sm mb-1">
+                Vault Balance
+                <InfoTip text="Total RLUSD in the pool right now — employee deposits + employer matches. This is what backs the loans." />
+              </div>
               <div className="text-xl font-semibold text-accent">{parseFloat(vault.vaultBalance).toFixed(2)}</div>
+              <div className="text-foreground/30 text-xs">RLUSD</div>
             </div>
             <div className="border border-card-border bg-card-bg rounded-xl p-5">
               <div className="text-foreground/50 text-sm mb-1">Employees</div>
               <div className="text-xl font-semibold">{vault.employees.length}</div>
             </div>
             <div className="border border-card-border bg-card-bg rounded-xl p-5">
-              <div className="text-foreground/50 text-sm mb-1">Active Loans</div>
+              <div className="flex items-center text-foreground/50 text-sm mb-1">
+                Active Loans
+                <InfoTip text="Loans currently outstanding — money borrowed by employees from the vault pool." />
+              </div>
               <div className="text-xl font-semibold">
                 {vault.loans.filter((l) => l.status === "active").length}
               </div>
             </div>
             <div className="border border-card-border bg-card-bg rounded-xl p-5">
-              <div className="text-foreground/50 text-sm mb-1">Employer Match</div>
+              <div className="flex items-center text-foreground/50 text-sm mb-1">
+                Employer Match
+                <InfoTip text="Your match rate and per-employee cap. When an employee deposits, you automatically contribute this percentage on top." />
+              </div>
               <div className="text-xl font-semibold">
                 {vault.config?.match ? `${(vault.config.match.rate * 100).toFixed(0)}%` : "—"}
               </div>
               <div className="text-foreground/40 text-xs mt-0.5">
-                {vault.config?.match?.capPerEmployee ? `up to $${vault.config.match.capPerEmployee}` : ""}
+                {vault.config?.match?.capPerEmployee ? `up to $${vault.config.match.capPerEmployee}/person` : ""}
               </div>
             </div>
           </div>
 
-          {/* Vault IDs */}
-          <div className="border border-card-border bg-card-bg rounded-xl p-4 text-xs text-foreground/40 space-y-1">
-            <div className="font-mono break-all">
-              Vault ID: {vault.id} <CopyButton text={vault.id} />
-            </div>
-            {vault.loanBrokerId && (
+          {/* Vault IDs — collapsed by default for cleanliness */}
+          <details className="border border-card-border bg-card-bg rounded-xl group">
+            <summary className="px-4 py-3 text-xs text-foreground/40 cursor-pointer hover:text-foreground/60 transition-colors flex items-center gap-2">
+              <svg className="h-3 w-3 transition-transform group-open:rotate-90" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" /></svg>
+              On-chain IDs &amp; transaction hashes
+            </summary>
+            <div className="px-4 pb-4 text-xs text-foreground/40 space-y-1 border-t border-card-border pt-3">
               <div className="font-mono break-all">
-                LoanBroker: {vault.loanBrokerId}
+                <span className="text-foreground/50">Vault ID:</span> {vault.id} <CopyButton text={vault.id} />
               </div>
-            )}
-            {vaultTxHashes && (
-              <div className="flex flex-wrap gap-3 mt-2 pt-2 border-t border-card-border">
-                {vaultTxHashes.vaultCreate && <TxLink hash={vaultTxHashes.vaultCreate} label="VaultCreate" />}
-                {vaultTxHashes.loanBroker && <TxLink hash={vaultTxHashes.loanBroker} label="LoanBroker" />}
-                {vaultTxHashes.coverDeposit && <TxLink hash={vaultTxHashes.coverDeposit} label="CoverDeposit" />}
-              </div>
-            )}
-          </div>
+              {vault.loanBrokerId && (
+                <div className="font-mono break-all">
+                  <span className="text-foreground/50">LoanBroker:</span> {vault.loanBrokerId}
+                </div>
+              )}
+              {vaultTxHashes && (
+                <div className="flex flex-wrap gap-3 mt-2 pt-2 border-t border-card-border">
+                  {vaultTxHashes.vaultCreate && <TxLink hash={vaultTxHashes.vaultCreate} label="VaultCreate" />}
+                  {vaultTxHashes.loanBroker && <TxLink hash={vaultTxHashes.loanBroker} label="LoanBroker" />}
+                  {vaultTxHashes.coverDeposit && <TxLink hash={vaultTxHashes.coverDeposit} label="CoverDeposit" />}
+                </div>
+              )}
+            </div>
+          </details>
 
           {/* Onboard Employee */}
           <div className="border border-card-border bg-card-bg rounded-xl p-6">
-            <h2 className="text-lg font-semibold mb-4">Onboard Employee</h2>
+            <h2 className="text-lg font-semibold mb-1">Onboard Employee</h2>
+            <p className="text-foreground/50 text-sm mb-4">
+              Add a team member to your vault. This creates their wallet, gives them test RLUSD, and issues an on-chain &quot;employee&quot; credential so they can deposit and borrow.
+            </p>
             <div className="flex gap-3">
               <input
                 type="text"
                 value={employeeName}
                 onChange={(e) => setEmployeeName(e.target.value)}
                 placeholder="Employee Name"
-                className="bg-background border border-card-border rounded-lg px-4 py-2 flex-1 text-sm"
+                className="bg-background border border-card-border rounded-lg px-4 py-2.5 flex-1 text-sm focus:outline-none focus:border-accent transition-colors"
               />
               <button
                 onClick={handleOnboard}
                 disabled={!!loading || !employeeName}
-                className="bg-accent hover:bg-accent-light text-black font-semibold px-6 py-2 rounded-lg transition-colors disabled:opacity-50"
+                className="bg-accent hover:bg-accent-light text-black font-semibold px-6 py-2.5 rounded-lg transition-colors disabled:opacity-50"
               >
                 Onboard
               </button>
             </div>
-            <p className="text-foreground/40 text-xs mt-2">
-              Creates wallet · sets RLUSD trust line · funds 1000 RLUSD · issues on-chain credential (~15–20s)
-            </p>
             {lastOnboardTx && (
               <div className="flex gap-3 mt-3 flex-wrap">
                 {lastOnboardTx.credentialCreate && <TxLink hash={lastOnboardTx.credentialCreate} label="CredentialCreate" />}
@@ -371,25 +456,33 @@ export default function EmployerDashboard() {
                         <div className="text-xs text-foreground/40 font-mono mt-1 break-all">
                           {emp.address} <CopyButton text={emp.address} />
                         </div>
-                        <div className="text-xs text-foreground/30 font-mono mt-1 break-all">
-                          Seed: {emp.seed} <CopyButton text={emp.seed} />
-                        </div>
-                        <div className="text-xs text-danger/60 mt-1">Share seed securely — employee needs this to connect</div>
+                        <details className="mt-1">
+                          <summary className="text-xs text-foreground/30 cursor-pointer hover:text-foreground/50 transition-colors">
+                            Show wallet seed (share privately with employee)
+                          </summary>
+                          <div className="text-xs text-foreground/30 font-mono mt-1 break-all">
+                            {emp.seed} <CopyButton text={emp.seed} />
+                          </div>
+                        </details>
                       </div>
                       <div className="text-right ml-4 shrink-0">
                         <div className="text-sm">
                           <span className="text-accent">{emp.rlusdBalance.toFixed(2)}</span>{" "}
                           <span className="text-foreground/50">RLUSD</span>
                         </div>
-                        <div className="text-xs text-foreground/50 mt-1">Shares: {emp.shares}</div>
+                        <div className="flex items-center justify-end text-xs text-foreground/50 mt-1">
+                          Shares: {emp.shares}
+                          <InfoTip text="Vault shares represent this employee's ownership stake in the pool. More shares = more of the pool belongs to them." />
+                        </div>
                       </div>
                     </div>
-                    <div className="flex gap-2 mt-2 flex-wrap">
+                    <div className="flex gap-2 mt-3 flex-wrap">
                       {emp.credentials.map((cred) => (
                         <span
                           key={cred}
-                          className={`text-xs px-2 py-0.5 rounded-full ${
-                            cred === "creditworthy" ? "bg-success/20 text-success" : "bg-accent/20 text-accent"
+                          title={CREDENTIAL_TIPS[cred] || ""}
+                          className={`text-xs px-2.5 py-0.5 rounded-full cursor-help ${
+                            cred === "creditworthy" ? "bg-success/20 text-success border border-success/30" : "bg-accent/20 text-accent border border-accent/30"
                           }`}
                         >
                           {cred}
@@ -399,12 +492,12 @@ export default function EmployerDashboard() {
 
                     {/* Clawback */}
                     {clawbackTarget === emp.address ? (
-                      <div className="flex gap-2 mt-3">
+                      <div className="flex gap-2 mt-3 items-center">
                         <input
                           type="number"
                           value={clawbackAmount}
                           onChange={(e) => setClawbackAmount(e.target.value)}
-                          placeholder="Amount (leave blank for all)"
+                          placeholder="Amount (blank = all)"
                           className="bg-background border border-card-border rounded-lg px-3 py-1.5 text-xs flex-1"
                         />
                         <button
@@ -424,9 +517,10 @@ export default function EmployerDashboard() {
                     ) : (
                       <button
                         onClick={() => setClawbackTarget(emp.address)}
+                        title="Reclaim unvested employer match shares from this employee"
                         className="mt-3 text-xs text-danger/60 hover:text-danger transition-colors"
                       >
-                        Clawback RLUSD
+                        Clawback shares
                       </button>
                     )}
                   </div>
@@ -438,7 +532,10 @@ export default function EmployerDashboard() {
           {/* Loans */}
           {vault.loans.length > 0 && (
             <div className="border border-card-border bg-card-bg rounded-xl p-6">
-              <h2 className="text-lg font-semibold mb-4">Loans</h2>
+              <div className="flex items-center mb-4">
+                <h2 className="text-lg font-semibold">Loans</h2>
+                <InfoTip text="Loans drawn by employees from the vault pool. You can mark a loan as defaulted if the employee stops repaying." />
+              </div>
               <div className="space-y-3">
                 {vault.loans.map((loan) => (
                   <div
@@ -453,15 +550,12 @@ export default function EmployerDashboard() {
                         <div className="text-xs text-foreground/40 mt-1">
                           Principal: {loan.principal} RLUSD
                         </div>
-                        <div className="text-xs text-foreground/40 font-mono mt-1 break-all">
-                          ID: {loan.id.slice(0, 16)}...
-                        </div>
                       </div>
                       <div className="text-right ml-4 shrink-0">
                         <div className="text-sm">
                           Remaining:{" "}
                           <span className={parseFloat(loan.remaining) > 0 ? "text-danger" : "text-success"}>
-                            {loan.remaining} RLUSD
+                            {parseFloat(loan.remaining).toFixed(2)} RLUSD
                           </span>
                         </div>
                         <span
@@ -481,6 +575,7 @@ export default function EmployerDashboard() {
                       <button
                         onClick={() => handleDefaultLoan(loan.id)}
                         disabled={!!loading}
+                        title="Mark this loan as defaulted — the cover deposit absorbs the loss"
                         className="mt-3 text-xs text-danger/60 hover:text-danger transition-colors disabled:opacity-30"
                       >
                         Mark as Default
