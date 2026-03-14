@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import NavLinks from "./NavLinks";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -28,26 +29,23 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <nav className="border-b border-card-border bg-card-bg/50 backdrop-blur-sm sticky top-0 z-50">
-          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-            <a href="/" className="text-2xl font-bold text-accent">
-              Hyve
+        <nav className="sticky top-0 z-50">
+          <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            {/* Logo */}
+            <a href="/" className="flex items-center gap-2 group">
+              <span
+                className="text-xl font-semibold tracking-widest text-accent group-hover:opacity-80 transition-opacity"
+                style={{ letterSpacing: "0.2em" }}
+              >
+                hyve
+              </span>
             </a>
-            <div className="flex gap-4 text-sm">
-              <a
-                href="/employer"
-                className="hover:text-accent transition-colors"
-              >
-                Employer
-              </a>
-              <a
-                href="/employee"
-                className="hover:text-accent transition-colors"
-              >
-                Employee
-              </a>
-            </div>
+
+            <NavLinks />
           </div>
+
+          {/* Thin amber underline */}
+          <div className="h-px bg-gradient-to-r from-transparent via-accent/30 to-transparent" />
         </nav>
         <main className="max-w-7xl mx-auto px-4 py-8">{children}</main>
       </body>
