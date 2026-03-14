@@ -368,7 +368,7 @@ export default function EmployerDashboard() {
                 </p>
               </button>
 
-              {/* Option 2: Demo wallet */}
+              {/* Option 2: Quick start */}
               <button
                 onClick={handleDemoInit}
                 disabled={!!loading}
@@ -378,11 +378,11 @@ export default function EmployerDashboard() {
                   <svg className="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                   </svg>
-                  <span className="font-semibold">Demo Mode</span>
+                  <span className="font-semibold">Quick Start</span>
                   <span className="text-xs bg-accent/20 text-accent rounded-full px-2 py-0.5">Recommended</span>
                 </div>
                 <p className="text-xs text-foreground/50">
-                  Auto-creates a funded test wallet on XRPL Devnet. No real money — perfect for trying the full flow.
+                  We&apos;ll set everything up for you — wallet, funding, and RLUSD. Ready to go in seconds.
                 </p>
               </button>
             </div>
@@ -588,13 +588,13 @@ export default function EmployerDashboard() {
                   onClick={() => setOnboardMode("demo")}
                   className={`text-xs px-3 py-1 rounded-md transition-all ${onboardMode === "demo" ? "bg-accent text-black font-medium" : "text-foreground/50 hover:text-foreground"}`}
                 >
-                  Demo
+                  Set Up For Them
                 </button>
                 <button
                   onClick={() => setOnboardMode("address")}
                   className={`text-xs px-3 py-1 rounded-md transition-all ${onboardMode === "address" ? "bg-accent text-black font-medium" : "text-foreground/50 hover:text-foreground"}`}
                 >
-                  By Address
+                  They Have a Wallet
                 </button>
               </div>
             </div>
@@ -602,7 +602,7 @@ export default function EmployerDashboard() {
             {onboardMode === "demo" ? (
               <>
                 <p className="text-foreground/50 text-sm mb-4">
-                  Creates a test wallet, funds it with RLUSD, and issues an on-chain &quot;employee&quot; credential.
+                  We&apos;ll create their wallet, fund it with RLUSD, and issue their on-chain employee credential — all in one step.
                 </p>
                 <div className="flex gap-3">
                   <input type="text" value={employeeName} onChange={(e) => setEmployeeName(e.target.value)}
