@@ -12,6 +12,7 @@
   "dependencies": {
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "pg": "^8.20.0",
     "xrpl": "^4.6.0",
     "xumm-sdk": "^1.11.2"
   }

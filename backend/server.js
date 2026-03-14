@@ -1,20 +1,51 @@
 import express from "express";
 import cors from "cors";
 import { createFundedWallet, walletFromSeed } from "./services/xrpl-client.js";
-import { setupRLUSDIssuer, getRLUSDIssuer, setupRLUSDTrustLine, fundWithRLUSD, getRLUSDBalance, getXRPBalance } from "./services/rlusd.js";
+import { setupRLUSDIssuer, getRLUSDIssuer, restoreRLUSDIssuer, setupRLUSDTrustLine, fundWithRLUSD, getRLUSDBalance, getXRPBalance } from "./services/rlusd.js";
 import { createVault, depositToVault, withdrawFromVault, getVaultInfo, clawbackVaultShares, getVaultShareBalance, getVaultShareStats } from "./services/vault.js";
 import { setupLoanBroker, depositCover, createLoan, repayLoan, getLoanInfo, defaultLoan, getLoanTierDefaults, mergeTierOverrides } from "./services/loans.js";
 import { issueCredential, acceptCredential, getCredentials, hasCredential } from "./services/credentials.js";
 import { calculateVestedAmount, calculateClawbackOnWithdraw } from "./services/vesting.js";
 import { createSignIn, getPayloadStatus, createTxPayload, getSignedTxBlob } from "./services/xumm.js";
 import { getClient } from "./services/xrpl-client.js";
+import { getDb, saveVault, loadVault, loadAllVaults, saveConfig, loadConfig } from "./services/db.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- In-memory app-level state (not financial state — that's on-chain) ---
+// --- App-level state: in-memory cache backed by Postgres ---
 const vaults = new Map(); // vaultId -> { companyName, employerSeed, employerAddress, loanBrokerId, employees[] }
+
+// Restore state from DB on startup
+async function restoreState() {
+  try {
+    const db = await getDb();
+    if (!db) return;
+
+    // Restore RLUSD issuer
+    const issuer = await loadConfig("rlusdIssuer");
+    if (issuer) {
+      restoreRLUSDIssuer(issuer);
+      console.log("Restored RLUSD issuer from DB:", issuer.address);
+    }
+
+    // Restore vaults
+    const allVaults = await loadAllVaults();
+    for (const v of allVaults) {
+      vaults.set(v.id, v);
+    }
+    console.log(`Restored ${allVaults.length} vaults from DB`);
+  } catch (err) {
+    console.warn("Could not restore state from DB:", err.message);
+  }
+}
+
+// Helper: persist vault to both Map and DB
+async function persistVault(vaultId, data) {
+  vaults.set(vaultId, data);
+  await saveVault(vaultId, data);
+}
 
 // Check if XUMM is configured
 function xummEnabled() {
@@ -111,6 +142,7 @@ app.get("/api/health", (req, res) => {
 app.post("/api/init", async (req, res) => {
   try {
     const issuer = await setupRLUSDIssuer();
+    await saveConfig("rlusdIssuer", { address: issuer.address, seed: issuer.seed });
     res.json({ success: true, issuerAddress: issuer.address });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -170,7 +202,7 @@ app.post("/api/vault/create", async (req, res) => {
     // Deposit first-loss cover capital
     const { txHash: coverTxHash } = await depositCover(employerSeed, loanBrokerId, 500);
 
-    vaults.set(vaultId, {
+    await persistVault(vaultId, {
       id: vaultId,
       companyName: companyName || "Hyve Vault",
       employerSeed,
@@ -229,6 +261,7 @@ app.post("/api/vault/:vaultId/member", async (req, res) => {
       totalMatched: 0,
     };
     vault.employees.push(employee);
+    await persistVault(vaultId, vault);
 
     res.json({
       success: true,
@@ -312,6 +345,7 @@ app.post("/api/vault/:vaultId/onboard", async (req, res) => {
       totalMatched: 0,
     };
     vault.employees.push(employee);
+    await persistVault(vaultId, vault);
 
     res.json({
       success: true,
@@ -380,6 +414,7 @@ app.post("/api/vault/:vaultId/deposit", async (req, res) => {
       }
     }
 
+    await persistVault(vaultId, vault);
     const vaultInfo = await getVaultInfo(vaultId);
 
     const response = {
@@ -456,6 +491,7 @@ app.post("/api/vault/:vaultId/loan/draw", async (req, res) => {
       createdAt: new Date().toISOString(),
     };
     vault.loans.push(loan);
+    await persistVault(vaultId, vault);
 
     res.json({ success: true, loan, tier: tierConfig, txHash });
   } catch (err) {
@@ -501,6 +537,7 @@ app.post("/api/vault/:vaultId/loan/repay", async (req, res) => {
       }
     }
 
+    await persistVault(vaultId, vault);
     const credentials = await getCredentials(loan.borrower);
 
     res.json({
@@ -641,6 +678,7 @@ app.post("/api/vault/:vaultId/withdraw", async (req, res) => {
       ? calculateVestedAmount(emp.matchDeposits, vault.config?.vesting)
       : null;
 
+    await persistVault(vaultId, vault);
     res.json({
       success: true,
       withdrawn: amount,
@@ -696,6 +734,7 @@ app.put("/api/vault/:vaultId/config", async (req, res) => {
       }
     }
 
+    await persistVault(req.params.vaultId, vault);
     res.json({ success: true, config: vault.config });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -843,6 +882,7 @@ app.post("/api/vault/:vaultId/loan/:loanId/default", async (req, res) => {
 
     const loan = vault.loans.find((l) => l.id === loanId);
     if (loan) loan.status = "defaulted";
+    await persistVault(vaultId, vault);
 
     res.json({ success: true, txHash });
   } catch (err) {
@@ -908,7 +948,7 @@ app.get("/api/vault/:vaultId/ledger", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Hyve backend running on http://localhost:${PORT}`);
   console.log("Connecting to XRPL Devnet...");
   if (xummEnabled()) {
@@ -916,4 +956,5 @@ app.listen(PORT, () => {
   } else {
     console.log("XUMM wallet connect: disabled (set XUMM_API_KEY + XUMM_API_SECRET to enable)");
   }
+  await restoreState();
 });

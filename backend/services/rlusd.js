@@ -43,6 +43,10 @@ export function getRLUSDIssuer() {
   return rlusdIssuer;
 }
 
+export function restoreRLUSDIssuer(issuer) {
+  rlusdIssuer = issuer;
+}
+
 export function rlusdCurrency() {
   return RLUSD_HEX;
 }
