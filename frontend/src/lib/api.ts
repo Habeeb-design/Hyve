@@ -13,6 +13,8 @@ async function request(path: string, options?: RequestInit) {
 export const api = {
   init: () => request("/init", { method: "POST" }),
 
+  health: () => request("/health"),
+
   createWallet: () => request("/wallet/create", { method: "POST" }),
 
   createVault: (employerSeed: string, companyName: string) =>
@@ -22,6 +24,8 @@ export const api = {
     }),
 
   getVault: (vaultId: string) => request(`/vault/${vaultId}`),
+
+  getVaultLedger: (vaultId: string) => request(`/vault/${vaultId}/ledger`),
 
   onboardEmployee: (vaultId: string, employeeName: string) =>
     request(`/vault/${vaultId}/onboard`, {
@@ -57,5 +61,20 @@ export const api = {
       body: JSON.stringify({ loanId, employeeSeed, amount }),
     }),
 
+  clawback: (vaultId: string, employeeAddress: string, amount?: number) =>
+    request(`/vault/${vaultId}/clawback`, {
+      method: "POST",
+      body: JSON.stringify({ employeeAddress, ...(amount !== undefined && { amount }) }),
+    }),
+
+  defaultLoan: (vaultId: string, loanId: string) =>
+    request(`/vault/${vaultId}/loan/${loanId}/default`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
   getBalance: (address: string) => request(`/balance/${address}`),
 };
+
+export const EXPLORER = (txHash: string) =>
+  `https://devnet.xrpl.org/transactions/${txHash}`;
