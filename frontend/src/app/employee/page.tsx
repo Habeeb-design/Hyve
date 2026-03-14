@@ -9,6 +9,7 @@ interface Loan {
   principal: number;
   remaining: string;
   status: string;
+  tier?: string;
   loanInfo?: { PrincipalOutstanding?: string } | null;
 }
 
@@ -18,6 +19,34 @@ interface LedgerEntry {
   type?: string;
   amount?: string;
   timestamp?: string;
+}
+
+interface YieldData {
+  deposits: { total: number; count: number };
+  employerMatch: {
+    totalMatched: number;
+    vested: number;
+    unvested: number;
+    vestPercent: number;
+    nextVestDate: string | null;
+    nextVestAmount: number;
+  };
+  shares: { count: number; price: number; currentValue: number };
+  yield: { earned: number; effectiveAPY: number };
+  withdrawable: { max: number; note: string | null };
+}
+
+interface TierInfo {
+  tierName: string;
+  InterestRate: number;
+  maxPrincipal: number;
+  PaymentTotal: number;
+  PaymentInterval: number;
+  GracePeriod: number;
+  requiredCredential: string;
+  requiresDeposit?: boolean;
+  eligible: boolean;
+  reason: string | null;
 }
 
 const CREDENTIAL_META: Record<string, { color: string; description: string }> = {
@@ -30,27 +59,6 @@ const CREDENTIAL_META: Record<string, { color: string; description: string }> = 
     description: "Proven repayer. Issued on full loan repayment.",
   },
 };
-
-const LOAN_TIERS = {
-  emergency: {
-    label: "Emergency",
-    apr: "5% APR",
-    payments: "6 payments",
-    interval: "30-day intervals",
-    grace: "7-day grace",
-    description: "Fast access to funds. Available to all employees.",
-    requiresCreditworthy: false,
-  },
-  standard: {
-    label: "Standard",
-    apr: "3% APR",
-    payments: "12 payments",
-    interval: "30-day intervals",
-    grace: null,
-    description: "Lower rate for proven repayers.",
-    requiresCreditworthy: true,
-  },
-} as const;
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -135,6 +143,24 @@ function RepaymentProgress({ principal, outstanding }: { principal: number; outs
   );
 }
 
+function VestingBar({ vestPercent, vested, unvested }: { vestPercent: number; vested: number; unvested: number }) {
+  return (
+    <div>
+      <div className="flex justify-between text-xs text-foreground/40 mb-1">
+        <span>${vested.toFixed(2)} vested</span>
+        <span>${unvested.toFixed(2)} unvested</span>
+      </div>
+      <div className="h-2 bg-background rounded-full overflow-hidden">
+        <div
+          className="h-full bg-accent rounded-full transition-all"
+          style={{ width: `${vestPercent}%` }}
+        />
+      </div>
+      <div className="text-xs text-foreground/30 mt-1">{vestPercent}% vested</div>
+    </div>
+  );
+}
+
 export default function EmployeeDashboard() {
   const [loading, setLoading] = useState("");
   const [error, setError] = useState("");
@@ -155,11 +181,17 @@ export default function EmployeeDashboard() {
   const [vaultBalance, setVaultBalance] = useState("0");
   const [loans, setLoans] = useState<Loan[]>([]);
 
+  // Yield / 401k
+  const [yieldData, setYieldData] = useState<YieldData | null>(null);
+
+  // Loan tiers from backend
+  const [loanTiers, setLoanTiers] = useState<Record<string, TierInfo>>({});
+
   // Actions
   const [depositAmount, setDepositAmount] = useState("200");
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [loanAmount, setLoanAmount] = useState("100");
-  const [loanTier, setLoanTier] = useState<"emergency" | "standard">("emergency");
+  const [loanTier, setLoanTier] = useState("emergency");
   const [repayAmounts, setRepayAmounts] = useState<Record<string, string>>({});
   const [lastTxHash, setLastTxHash] = useState<string | null>(null);
   const [creditworthyCelebration, setCreditworthyCelebration] = useState(false);
@@ -208,6 +240,20 @@ export default function EmployeeDashboard() {
     finally { setLedgerLoading(false); }
   }
 
+  async function fetchYield(vid: string, addr: string) {
+    try {
+      const data = await api.getYield(vid, addr);
+      setYieldData(data);
+    } catch {}
+  }
+
+  async function fetchLoanTiers(vid: string, addr: string) {
+    try {
+      const data = await api.getLoanTiers(vid, addr);
+      setLoanTiers(data.tiers || {});
+    } catch {}
+  }
+
   async function handleConnect() {
     if (!vaultId || !employeeSeed) return;
     setLoading("Loading vault data from XRPL...");
@@ -230,6 +276,10 @@ export default function EmployeeDashboard() {
       setLoans(vault.loans.filter((l: Loan) => l.borrower === emp.address));
       setConnected(true);
       setLoading("");
+
+      // Fetch yield and loan tiers in background
+      fetchYield(vaultId, emp.address);
+      fetchLoanTiers(vaultId, emp.address);
 
       // Pre-fetch ledger silently
       api.getVaultLedger(vaultId).then((data) => {
@@ -254,6 +304,8 @@ export default function EmployeeDashboard() {
     setVaultBalance("0");
     setLoans([]);
     setLedger([]);
+    setYieldData(null);
+    setLoanTiers({});
     setActiveTab("savings");
     setLastTxHash(null);
     setCreditworthyCelebration(false);
@@ -271,6 +323,8 @@ export default function EmployeeDashboard() {
       setCredentials(balances.credentials);
       setVaultBalance(vault.vaultBalance);
       setLoans(vault.loans.filter((l: Loan) => l.borrower === employeeAddress));
+      fetchYield(vaultId, employeeAddress);
+      fetchLoanTiers(vaultId, employeeAddress);
     } catch {}
   }
 
@@ -312,7 +366,7 @@ export default function EmployeeDashboard() {
   async function handleDrawLoan() {
     const amt = parseFloat(loanAmount);
     if (!amt || amt <= 0) return;
-    setLoading(`Drawing ${amt} RLUSD loan...`);
+    setLoading(`Drawing ${amt} RLUSD ${loanTier} loan...`);
     setError("");
     setLastTxHash(null);
     try {
@@ -364,6 +418,14 @@ export default function EmployeeDashboard() {
     repay: "bg-purple-500/20 text-purple-400",
   };
 
+  function formatAPR(rate: number) {
+    return `${(rate / 100).toFixed(1)}%`;
+  }
+
+  function formatDays(seconds: number) {
+    return `${Math.round(seconds / 86400)}d`;
+  }
+
   return (
     <div>
       {loading && <Spinner text={loading} />}
@@ -376,10 +438,9 @@ export default function EmployeeDashboard() {
 
       {creditworthyCelebration && (
         <div className="bg-success/10 border border-success/40 rounded-xl p-5 mb-6 text-center">
-          <div className="text-2xl mb-1">🎉</div>
           <div className="text-success font-semibold text-lg">Loan fully repaid!</div>
           <div className="text-success/70 text-sm mt-1">
-            You&apos;ve earned the <strong>creditworthy</strong> on-chain credential.
+            You&apos;ve earned the <strong>creditworthy</strong> on-chain credential — better rates unlocked.
           </div>
         </div>
       )}
@@ -388,7 +449,7 @@ export default function EmployeeDashboard() {
         <div className="bg-card-bg border border-card-border rounded-lg p-3 mb-4 text-xs flex items-center gap-2">
           <span className="text-foreground/50">Tx:</span>
           <TxLink hash={lastTxHash} />
-          <span className="text-foreground/30">→ devnet.xrpl.org</span>
+          <span className="text-foreground/30">devnet.xrpl.org</span>
         </div>
       )}
 
@@ -460,7 +521,6 @@ export default function EmployeeDashboard() {
         <div>
           {/* Header Bar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-5 border-b border-card-border">
-            {/* Left: identity */}
             <div>
               <div className="flex items-center gap-2.5 mb-0.5">
                 <h1 className="text-2xl font-bold">{employeeName || "Employee"}</h1>
@@ -477,7 +537,6 @@ export default function EmployeeDashboard() {
               </div>
             </div>
 
-            {/* Right: actions */}
             <div className="flex gap-3 items-center shrink-0">
               <button
                 onClick={refresh}
@@ -503,7 +562,7 @@ export default function EmployeeDashboard() {
             <StatCard label="Your RLUSD" value={rlusdBalance.toFixed(2)} sub="wallet balance" accent />
             <StatCard label="Your XRP" value={xrpBalance.toFixed(2)} sub="for tx fees" />
             <StatCard label="Vault Pool" value={parseFloat(vaultBalance).toFixed(2)} sub="RLUSD pooled" accent />
-            <StatCard label="Your Shares" value={String(shares)} sub="1 share = 1 RLUSD deposited" />
+            <StatCard label="Your Shares" value={String(shares)} sub={yieldData ? `$${yieldData.shares.currentValue.toFixed(2)} value` : "1 share ≈ 1 RLUSD"} />
           </div>
 
           {/* Credentials Strip */}
@@ -561,25 +620,72 @@ export default function EmployeeDashboard() {
           {/* ─── Savings Tab ─── */}
           {activeTab === "savings" && (
             <div className="space-y-5">
-              {/* Mini stats */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-card-bg border border-card-border rounded-xl p-5">
-                  <div className="text-foreground/50 text-xs uppercase tracking-wide mb-2">Your Shares</div>
-                  <div className="text-3xl font-bold">{shares}</div>
-                  <div className="text-foreground/30 text-xs mt-1">Each share = 1 RLUSD deposited</div>
+
+              {/* 401k Yield Breakdown */}
+              {yieldData && (
+                <div className="border border-card-border bg-card-bg rounded-xl p-6">
+                  <h2 className="text-base font-semibold mb-4">401k Breakdown</h2>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+                    <div>
+                      <div className="text-foreground/50 text-xs uppercase tracking-wide mb-1">Your Deposits</div>
+                      <div className="text-xl font-bold">${yieldData.deposits.total.toFixed(2)}</div>
+                      <div className="text-foreground/30 text-xs">{yieldData.deposits.count} deposit{yieldData.deposits.count !== 1 ? "s" : ""}</div>
+                    </div>
+                    <div>
+                      <div className="text-foreground/50 text-xs uppercase tracking-wide mb-1">Employer Match</div>
+                      <div className="text-xl font-bold text-accent">${yieldData.employerMatch.totalMatched.toFixed(2)}</div>
+                      <div className="text-foreground/30 text-xs">
+                        ${yieldData.employerMatch.vested.toFixed(2)} vested
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-foreground/50 text-xs uppercase tracking-wide mb-1">Share Value</div>
+                      <div className="text-xl font-bold">${yieldData.shares.currentValue.toFixed(2)}</div>
+                      <div className="text-foreground/30 text-xs">
+                        {yieldData.shares.count} shares @ ${yieldData.shares.price.toFixed(3)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-foreground/50 text-xs uppercase tracking-wide mb-1">Withdrawable</div>
+                      <div className="text-xl font-bold text-success">${yieldData.withdrawable.max.toFixed(2)}</div>
+                      {yieldData.withdrawable.note && (
+                        <div className="text-danger/60 text-xs">{yieldData.withdrawable.note}</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Vesting bar */}
+                  {yieldData.employerMatch.totalMatched > 0 && (
+                    <div className="border-t border-card-border pt-4">
+                      <div className="text-foreground/50 text-xs uppercase tracking-wide mb-2">Employer Match Vesting</div>
+                      <VestingBar
+                        vestPercent={yieldData.employerMatch.vestPercent}
+                        vested={yieldData.employerMatch.vested}
+                        unvested={yieldData.employerMatch.unvested}
+                      />
+                      {yieldData.employerMatch.nextVestDate && (
+                        <div className="text-xs text-foreground/40 mt-2">
+                          Next vest: ${yieldData.employerMatch.nextVestAmount.toFixed(2)} on {yieldData.employerMatch.nextVestDate}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Yield */}
+                  {yieldData.yield.earned > 0 && (
+                    <div className="border-t border-card-border pt-4 mt-4">
+                      <div className="text-foreground/50 text-xs uppercase tracking-wide mb-1">Yield Earned</div>
+                      <div className="text-xl font-bold text-success">${yieldData.yield.earned.toFixed(2)}</div>
+                    </div>
+                  )}
                 </div>
-                <div className="bg-card-bg border border-card-border rounded-xl p-5">
-                  <div className="text-foreground/50 text-xs uppercase tracking-wide mb-2">Available to Deposit</div>
-                  <div className="text-3xl font-bold text-accent">{rlusdBalance.toFixed(2)}</div>
-                  <div className="text-foreground/30 text-xs mt-1">RLUSD in your wallet</div>
-                </div>
-              </div>
+              )}
 
               {/* Deposit card */}
               <div className="border border-card-border bg-card-bg rounded-xl p-6">
                 <h2 className="text-base font-semibold mb-1">Deposit to Vault</h2>
                 <p className="text-foreground/40 text-xs mb-4">
-                  Pooled deposits back loans for other members. Earn vault shares proportional to your contribution. Takes ~5–10s on-chain.
+                  Pooled deposits back loans for other members. Your employer matches at the configured rate. Takes ~5–10s on-chain.
                 </p>
                 <div className="flex gap-3 flex-wrap items-end">
                   <div>
@@ -634,7 +740,7 @@ export default function EmployeeDashboard() {
                         className="bg-background border border-card-border rounded-lg px-4 py-2 w-36 text-sm focus:outline-none focus:border-accent transition-colors disabled:opacity-40"
                       />
                       <button
-                        onClick={() => setWithdrawAmount(String(shares))}
+                        onClick={() => setWithdrawAmount(String(yieldData?.withdrawable.max || shares))}
                         disabled={shares === 0}
                         className="text-xs px-2.5 py-2 border border-card-border rounded-lg text-foreground/50 hover:text-accent hover:border-accent/40 transition-colors disabled:opacity-40"
                       >
@@ -679,6 +785,9 @@ export default function EmployeeDashboard() {
                             <div className="text-sm font-medium">
                               Principal:{" "}
                               <span className="text-accent font-semibold">{loan.principal} RLUSD</span>
+                              {loan.tier && (
+                                <span className="ml-2 text-xs text-foreground/40 bg-card-border rounded px-1.5 py-0.5">{loan.tier}</span>
+                              )}
                             </div>
                             <div className="text-xs text-foreground/30 font-mono mt-1">
                               {loan.id.slice(0, 20)}...
@@ -751,18 +860,17 @@ export default function EmployeeDashboard() {
                 </div>
               )}
 
-              {/* Loan Tier Selection */}
+              {/* Loan Tier Selection — from backend */}
               <div>
                 <h2 className="text-sm font-medium text-foreground/50 uppercase tracking-wide mb-3">Select Loan Tier</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {(["emergency", "standard"] as const).map((tier) => {
-                    const t = LOAN_TIERS[tier];
-                    const isSelected = loanTier === tier;
-                    const isLocked = t.requiresCreditworthy && !hasCreditworthy;
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {Object.entries(loanTiers).map(([tierName, tier]) => {
+                    const isSelected = loanTier === tierName;
+                    const isLocked = !tier.eligible;
                     return (
                       <button
-                        key={tier}
-                        onClick={() => !isLocked && setLoanTier(tier)}
+                        key={tierName}
+                        onClick={() => !isLocked && setLoanTier(tierName)}
                         disabled={isLocked}
                         className={`text-left rounded-xl p-4 border-2 transition-all ${
                           isSelected
@@ -773,28 +881,40 @@ export default function EmployeeDashboard() {
                         }`}
                       >
                         <div className="flex items-center justify-between mb-2">
-                          <span className="font-semibold text-sm">{t.label}</span>
+                          <span className="font-semibold text-sm capitalize">{tierName}</span>
                           {isLocked ? (
                             <span className="text-xs text-foreground/40 flex items-center gap-1">
                               <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
                                 <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                               </svg>
-                              Requires creditworthy
+                              Locked
                             </span>
                           ) : isSelected ? (
                             <span className="text-xs text-accent font-medium">Selected</span>
                           ) : null}
                         </div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2">
-                          <span className={`text-sm font-bold ${isSelected ? "text-accent" : "text-foreground"}`}>{t.apr}</span>
-                          <span className="text-xs text-foreground/50">{t.payments}</span>
-                          <span className="text-xs text-foreground/50">{t.interval}</span>
-                          {t.grace && <span className="text-xs text-foreground/50">{t.grace} grace</span>}
+                        <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2">
+                          <span className={`text-sm font-bold ${isSelected ? "text-accent" : "text-foreground"}`}>
+                            {formatAPR(tier.InterestRate)} APR
+                          </span>
+                          <span className="text-xs text-foreground/50">{tier.PaymentTotal} payments</span>
+                          <span className="text-xs text-foreground/50">{formatDays(tier.PaymentInterval)} intervals</span>
                         </div>
-                        <p className="text-xs text-foreground/40">{t.description}</p>
+                        <div className="text-xs text-foreground/40">
+                          Max ${tier.maxPrincipal}
+                          {tier.GracePeriod > 0 && ` · ${formatDays(tier.GracePeriod)} grace`}
+                        </div>
+                        {isLocked && tier.reason && (
+                          <div className="text-xs text-danger/60 mt-1">{tier.reason}</div>
+                        )}
                       </button>
                     );
                   })}
+                  {Object.keys(loanTiers).length === 0 && (
+                    <div className="col-span-3 text-foreground/30 text-sm text-center py-4">
+                      Loading loan tiers...
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -802,11 +922,19 @@ export default function EmployeeDashboard() {
               <div className="border border-card-border bg-card-bg rounded-xl p-6">
                 <h2 className="text-base font-semibold mb-1">Draw Loan</h2>
                 <p className="text-foreground/40 text-xs mb-1">
-                  Borrowing at <span className="text-foreground/70">{LOAN_TIERS[loanTier].apr}</span> · {LOAN_TIERS[loanTier].payments} · {LOAN_TIERS[loanTier].interval}
-                  {LOAN_TIERS[loanTier].grace ? ` · ${LOAN_TIERS[loanTier].grace} grace` : ""}
+                  {loanTiers[loanTier] ? (
+                    <>
+                      Borrowing at <span className="text-foreground/70">{formatAPR(loanTiers[loanTier].InterestRate)} APR</span>
+                      {" · "}{loanTiers[loanTier].PaymentTotal} payments
+                      {" · "}{formatDays(loanTiers[loanTier].PaymentInterval)} intervals
+                      {loanTiers[loanTier].GracePeriod > 0 && ` · ${formatDays(loanTiers[loanTier].GracePeriod)} grace`}
+                    </>
+                  ) : (
+                    "Select a tier above"
+                  )}
                 </p>
                 <p className="text-foreground/30 text-xs mb-4">
-                  Requires the &quot;employee&quot; credential. Takes ~5–10s on-chain.
+                  Requires the &quot;{loanTiers[loanTier]?.requiredCredential || "employee"}&quot; credential. Takes ~5–10s on-chain.
                 </p>
                 <div className="flex gap-3 flex-wrap items-end">
                   <div>
@@ -816,12 +944,13 @@ export default function EmployeeDashboard() {
                       value={loanAmount}
                       onChange={(e) => setLoanAmount(e.target.value)}
                       placeholder="0.00"
+                      max={loanTiers[loanTier]?.maxPrincipal}
                       className="bg-background border border-card-border rounded-lg px-4 py-2 w-36 text-sm focus:outline-none focus:border-accent transition-colors"
                     />
                   </div>
                   <button
                     onClick={handleDrawLoan}
-                    disabled={!!loading || !hasEmployee}
+                    disabled={!!loading || !hasEmployee || (loanTiers[loanTier] && !loanTiers[loanTier].eligible)}
                     className="bg-accent hover:bg-accent-light text-black font-semibold px-6 py-2 rounded-lg transition-colors disabled:opacity-50"
                   >
                     Draw Loan
@@ -829,6 +958,9 @@ export default function EmployeeDashboard() {
                 </div>
                 {!hasEmployee && (
                   <p className="text-danger text-xs mt-2">Missing &quot;employee&quot; credential — contact your employer to be added as a member.</p>
+                )}
+                {loanTiers[loanTier] && !loanTiers[loanTier].eligible && hasEmployee && (
+                  <p className="text-danger text-xs mt-2">{loanTiers[loanTier].reason}</p>
                 )}
               </div>
             </div>

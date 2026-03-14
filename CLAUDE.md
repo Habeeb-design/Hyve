@@ -73,13 +73,18 @@ cd frontend && npm install && npm run dev
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/init` | Initialize RLUSD issuer on Devnet |
-| POST | `/api/vault/create` | Real VaultCreate + LoanBrokerSet + cover deposit |
+| POST | `/api/vault/create` | VaultCreate (non-transferable) + LoanBrokerSet + cover deposit + 401k config |
+| GET  | `/api/vault/:id/config` | Get vault config (match, vesting, loan tiers) |
+| PUT  | `/api/vault/:id/config` | Update vault config (in-memory) |
 | POST | `/api/vault/:id/member` | Add member by XRPL address (issues credential) |
 | POST | `/api/vault/:id/member/accept` | Employee accepts credential |
 | POST | `/api/vault/:id/onboard` | Demo: create wallet + fund + credential in one call |
-| POST | `/api/vault/:id/deposit` | Real VaultDeposit |
-| POST | `/api/vault/:id/loan/draw` | Real LoanSet (co-signed by borrower) |
-| POST | `/api/vault/:id/loan/repay` | Real LoanPay (creditworthy on full repay) |
+| POST | `/api/vault/:id/deposit` | VaultDeposit + auto employer match |
+| POST | `/api/vault/:id/withdraw` | Vesting-aware VaultWithdraw (claws back unvested match) |
+| GET  | `/api/vault/:id/loan/tiers` | Available loan tiers + eligibility for employee |
+| POST | `/api/vault/:id/loan/draw` | Tier-based LoanSet (co-signed by borrower) |
+| POST | `/api/vault/:id/loan/repay` | LoanPay (creditworthy credential on full repay) |
+| GET  | `/api/vault/:id/employee/:addr/yield` | 401k yield breakdown (deposits, match, vesting, shares) |
 | GET  | `/api/vault/:id` | Vault info from real ledger objects |
 | GET  | `/api/balance/:address` | Wallet balances + on-chain credentials |
 | POST | `/api/vault/:id/clawback` | VaultClawback — employer reclaims shares |
@@ -104,9 +109,12 @@ cd frontend && npm install && npm run dev
 
 ## Notes
 - Financial state (balances, shares, loans, credentials) comes from the real XRPL ledger
-- App-level metadata (company name, employee list) is in-memory — restart clears it
+- App-level metadata (company name, employee list, vesting state) is in-memory — restart clears it
 - Devnet may reset periodically, wiping all on-chain state
 - XUMM wallet connect is optional — works without it using seed-based auth
 - LoanSet requires counterparty co-signature (borrower + broker both sign)
 - All responses include txHash fields linking to devnet explorer
+- Vault shares are non-transferable (tfVaultShareNonTransferable) — 401k model, not tradeable
+- Employer match auto-deposits on employee deposit; silently skips if employer has insufficient RLUSD
+- Vesting is in-memory only — lost on restart (fine for hackathon)
 - See `FRONTEND_SPEC.md` for detailed API contract and UI flow descriptions

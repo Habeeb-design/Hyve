@@ -98,10 +98,13 @@ export async function getVaultInfo(vaultId) {
 export async function getVaultShareBalance(vaultId, holderAddress) {
   const c = await getClient();
 
-  // Get vault's MPTokenIssuanceID from the vault ledger object
+  // Get vault's MPTokenIssuanceID and scale from the vault ledger object
   const vaultObj = await getVaultInfo(vaultId);
-  const issuanceId = vaultObj.MPTokenIssuanceID;
+  const issuanceId = vaultObj.ShareMPTID || vaultObj.MPTokenIssuanceID;
   if (!issuanceId) return 0;
+
+  const scale = vaultObj.Scale || 0;
+  const divisor = Math.pow(10, scale);
 
   try {
     const response = await c.request({
@@ -114,10 +117,39 @@ export async function getVaultShareBalance(vaultId, holderAddress) {
     const token = response.result.account_objects.find(
       (obj) => obj.MPTokenIssuanceID === issuanceId
     );
-    return token ? parseFloat(token.MPTAmount || "0") : 0;
+    return token ? parseFloat(token.MPTAmount || "0") / divisor : 0;
   } catch {
     return 0;
   }
+}
+
+// Get total outstanding shares (scaled) and share price for a vault
+export async function getVaultShareStats(vaultId) {
+  const c = await getClient();
+  const vaultObj = await getVaultInfo(vaultId);
+  const scale = vaultObj.Scale || 0;
+  const divisor = Math.pow(10, scale);
+  const assetsTotal = parseFloat(vaultObj.AssetsTotal || "0");
+
+  // Get total outstanding shares from the MPTokenIssuance object on the vault's account
+  let totalShares = 0;
+  try {
+    const response = await c.request({
+      command: "account_objects",
+      account: vaultObj.Account,
+      ledger_index: "validated",
+    });
+    const issuance = response.result.account_objects.find(
+      (obj) => obj.LedgerEntryType === "MPTokenIssuance"
+    );
+    if (issuance) {
+      totalShares = parseFloat(issuance.OutstandingAmount || "0") / divisor;
+    }
+  } catch {}
+
+  const sharePrice = totalShares > 0 ? assetsTotal / totalShares : 1.0;
+
+  return { assetsTotal, totalShares, sharePrice };
 }
 
 export async function clawbackVaultShares(vaultId, holderAddress, amount) {

@@ -30,6 +30,10 @@ interface VaultData {
   totalDeposits: number;
   employees: Employee[];
   loans: Loan[];
+  config?: {
+    match?: { rate: number; capPerEmployee: number };
+    vesting?: { type: string; periodMonths: number; totalPeriods: number; cliffMonths: number };
+  };
 }
 
 interface TxHashes {
@@ -91,6 +95,8 @@ export default function EmployerDashboard() {
   const [vault, setVault] = useState<VaultData | null>(null);
   const [vaultTxHashes, setVaultTxHashes] = useState<TxHashes | null>(null);
   const [companyName, setCompanyName] = useState("Acme Corp");
+  const [matchRate, setMatchRate] = useState("0.5");
+  const [matchCap, setMatchCap] = useState("500");
   const [employeeName, setEmployeeName] = useState("");
   const [lastOnboardTx, setLastOnboardTx] = useState<TxHashes | null>(null);
   const [clawbackTarget, setClawbackTarget] = useState<string>("");
@@ -115,7 +121,10 @@ export default function EmployerDashboard() {
     setLoading("Creating vault on XRPL Devnet (3 on-chain transactions)...");
     setError("");
     try {
-      const result = await api.createVault(employer.seed, companyName);
+      const result = await api.createVault(employer.seed, companyName, {
+        matchRate: parseFloat(matchRate) || 0,
+        matchCap: parseFloat(matchCap) || 0,
+      });
       setVaultTxHashes(result.txHashes);
       const vaultData = await api.getVault(result.vaultId);
       setVault(vaultData);
@@ -219,14 +228,35 @@ export default function EmployerDashboard() {
             Employer: {employer.address}
             <CopyButton text={employer.address} />
           </div>
-          <div className="flex gap-3">
+          <div className="space-y-3">
             <input
               type="text"
               value={companyName}
               onChange={(e) => setCompanyName(e.target.value)}
               placeholder="Company Name"
-              className="bg-background border border-card-border rounded-lg px-4 py-2 flex-1 text-sm"
+              className="bg-background border border-card-border rounded-lg px-4 py-2 w-full text-sm"
             />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-foreground/50 mb-1">Match Rate (e.g. 0.5 = 50%)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={matchRate}
+                  onChange={(e) => setMatchRate(e.target.value)}
+                  className="bg-background border border-card-border rounded-lg px-4 py-2 w-full text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-foreground/50 mb-1">Match Cap (RLUSD per employee)</label>
+                <input
+                  type="number"
+                  value={matchCap}
+                  onChange={(e) => setMatchCap(e.target.value)}
+                  className="bg-background border border-card-border rounded-lg px-4 py-2 w-full text-sm"
+                />
+              </div>
+            </div>
             <button
               onClick={handleCreateVault}
               disabled={!!loading}
@@ -235,7 +265,7 @@ export default function EmployerDashboard() {
               Create Vault
             </button>
           </div>
-          <p className="text-foreground/40 text-xs mt-2">Takes ~15–20s (3 on-chain transactions)</p>
+          <p className="text-foreground/40 text-xs mt-2">Takes ~15–20s (3 on-chain transactions: VaultCreate + LoanBrokerSet + cover deposit)</p>
         </div>
       )}
 
@@ -244,7 +274,7 @@ export default function EmployerDashboard() {
         <div className="space-y-6">
 
           {/* Vault Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="border border-card-border bg-card-bg rounded-xl p-5">
               <div className="text-foreground/50 text-sm mb-1">Company</div>
               <div className="text-xl font-semibold">{vault.companyName}</div>
@@ -261,6 +291,15 @@ export default function EmployerDashboard() {
               <div className="text-foreground/50 text-sm mb-1">Active Loans</div>
               <div className="text-xl font-semibold">
                 {vault.loans.filter((l) => l.status === "active").length}
+              </div>
+            </div>
+            <div className="border border-card-border bg-card-bg rounded-xl p-5">
+              <div className="text-foreground/50 text-sm mb-1">Employer Match</div>
+              <div className="text-xl font-semibold">
+                {vault.config?.match ? `${(vault.config.match.rate * 100).toFixed(0)}%` : "—"}
+              </div>
+              <div className="text-foreground/40 text-xs mt-0.5">
+                {vault.config?.match?.capPerEmployee ? `up to $${vault.config.match.capPerEmployee}` : ""}
               </div>
             </div>
           </div>

@@ -17,13 +17,19 @@ export const api = {
 
   createWallet: () => request("/wallet/create", { method: "POST" }),
 
-  createVault: (employerSeed: string, companyName: string) =>
+  createVault: (
+    employerSeed: string,
+    companyName: string,
+    config?: { matchRate?: number; matchCap?: number; vestingType?: string; vestingPeriods?: number; cliffMonths?: number }
+  ) =>
     request("/vault/create", {
       method: "POST",
-      body: JSON.stringify({ employerSeed, companyName }),
+      body: JSON.stringify({ employerSeed, companyName, ...config }),
     }),
 
   getVault: (vaultId: string) => request(`/vault/${vaultId}`),
+
+  getVaultConfig: (vaultId: string) => request(`/vault/${vaultId}/config`),
 
   getVaultLedger: (vaultId: string) => request(`/vault/${vaultId}/ledger`),
 
@@ -38,6 +44,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ employeeSeed, amount }),
     }),
+
+  withdraw: (vaultId: string, employeeSeed: string, amount: number) =>
+    request(`/vault/${vaultId}/withdraw`, {
+      method: "POST",
+      body: JSON.stringify({ employeeSeed, amount }),
+    }),
+
+  getLoanTiers: (vaultId: string, address: string) =>
+    request(`/vault/${vaultId}/loan/tiers?address=${address}`),
 
   drawLoan: (
     vaultId: string,
@@ -62,6 +77,9 @@ export const api = {
       body: JSON.stringify({ loanId, employeeSeed, amount }),
     }),
 
+  getYield: (vaultId: string, address: string) =>
+    request(`/vault/${vaultId}/employee/${address}/yield`),
+
   clawback: (vaultId: string, employeeAddress: string, amount?: number) =>
     request(`/vault/${vaultId}/clawback`, {
       method: "POST",
@@ -75,12 +93,6 @@ export const api = {
     }),
 
   getBalance: (address: string) => request(`/balance/${address}`),
-
-  withdraw: (vaultId: string, seed: string, amount: number) =>
-    request(`/vault/${vaultId}/withdraw`, {
-      method: "POST",
-      body: JSON.stringify({ seed, amount }),
-    }),
 };
 
 export const EXPLORER = (txHash: string) =>

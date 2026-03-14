@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import { createFundedWallet, walletFromSeed } from "./services/xrpl-client.js";
 import { setupRLUSDIssuer, getRLUSDIssuer, setupRLUSDTrustLine, fundWithRLUSD, getRLUSDBalance, getXRPBalance } from "./services/rlusd.js";
-import { createVault, depositToVault, withdrawFromVault, getVaultInfo, clawbackVaultShares, getVaultShareBalance } from "./services/vault.js";
+import { createVault, depositToVault, withdrawFromVault, getVaultInfo, clawbackVaultShares, getVaultShareBalance, getVaultShareStats } from "./services/vault.js";
 import { setupLoanBroker, depositCover, createLoan, repayLoan, getLoanInfo, defaultLoan, getLoanTierDefaults, mergeTierOverrides } from "./services/loans.js";
 import { issueCredential, acceptCredential, getCredentials, hasCredential } from "./services/credentials.js";
 import { calculateVestedAmount, calculateClawbackOnWithdraw } from "./services/vesting.js";
@@ -357,6 +357,7 @@ app.post("/api/vault/:vaultId/deposit", async (req, res) => {
     // 2. Auto employer match
     let matchAmount = 0;
     let matchTxHash = null;
+    let matchError = null;
     const matchConfig = vault.config?.match;
     if (matchConfig && matchConfig.rate > 0 && emp) {
       const alreadyMatched = emp.totalMatched || 0;
@@ -374,20 +375,23 @@ app.post("/api/vault/:vaultId/deposit", async (req, res) => {
         } catch (matchErr) {
           console.warn("Employer match deposit failed (employee deposit still succeeded):", matchErr.message);
           matchAmount = 0;
+          matchError = matchErr.message;
         }
       }
     }
 
     const vaultInfo = await getVaultInfo(vaultId);
 
-    res.json({
+    const response = {
       success: true,
       deposited: amount,
       matchAmount,
       totalVaultBalance: vaultInfo.AssetsTotal || vaultInfo.Asset?.value || 0,
       txHash,
       matchTxHash,
-    });
+    };
+    if (matchError) response.matchError = matchError;
+    res.json(response);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -530,14 +534,14 @@ app.get("/api/vault/:vaultId", async (req, res) => {
     const employeesWithBalances = await Promise.all(
       vault.employees.map(async (emp) => {
         const credentials = await getCredentials(emp.address);
+        const shares = await getVaultShareBalance(req.params.vaultId, emp.address);
         return {
           name: emp.name,
           address: emp.address,
+          seed: emp.seed || null,
           rlusdBalance: await getRLUSDBalance(emp.address),
-          credentials: credentials.map((c) => ({
-            type: c.credentialType,
-            accepted: c.accepted,
-          })),
+          shares,
+          credentials: credentials.filter((c) => c.accepted).map((c) => c.credentialType),
         };
       })
     );
@@ -587,11 +591,7 @@ app.get("/api/balance/:address", async (req, res) => {
       address: req.params.address,
       rlusd,
       xrp,
-      credentials: credentials.map((c) => ({
-        type: c.credentialType,
-        issuer: c.issuer,
-        accepted: c.accepted,
-      })),
+      credentials: credentials.filter((c) => c.accepted).map((c) => c.credentialType),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -765,15 +765,13 @@ app.get("/api/vault/:vaultId/employee/:address/yield", async (req, res) => {
       vault.config?.vesting
     );
 
-    // Share balance + price from on-chain
+    // Share balance + price from on-chain (scaled by vault's Scale field)
     let shares = 0;
     let sharePrice = 1.0;
     try {
       shares = await getVaultShareBalance(vaultId, address);
-      const vaultInfo = await getVaultInfo(vaultId);
-      const assetsTotal = parseFloat(vaultInfo.AssetsTotal || "0");
-      const sharesTotal = parseFloat(vaultInfo.SharesTotal || "0");
-      if (sharesTotal > 0) sharePrice = assetsTotal / sharesTotal;
+      const stats = await getVaultShareStats(vaultId);
+      sharePrice = stats.sharePrice;
     } catch {}
 
     const currentValue = Math.round(shares * sharePrice * 100) / 100;
